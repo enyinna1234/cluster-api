@@ -35,8 +35,8 @@ import (
 )
 
 const (
-	standardImage   = "us.gcr.io/k8s-artifacts-prod/conformance"
-	ciArtifactImage = "gcr.io/kubernetes-ci-images/conformance"
+	standardImage   = "k8s.gcr.io/conformance"
+	ciArtifactImage = "gcr.io/k8s-staging-ci-images/conformance"
 )
 
 const (
@@ -63,6 +63,9 @@ type RunInput struct {
 	KubernetesVersion string
 	// ConformanceImage is an optional field to specify an exact conformance image
 	ConformanceImage string
+	// KubeTestRepoListPath is optional file for specifying custom image repositories
+	// https://github.com/kubernetes/kubernetes/blob/master/test/images/README.md#testing-the-new-image
+	KubeTestRepoListPath string
 }
 
 // Run executes kube-test given an artifact directory, and sets settings
@@ -118,6 +121,14 @@ func Run(ctx context.Context, input RunInput) error {
 		return err
 	}
 
+	var testRepoListVolumeArgs []string
+	if input.KubeTestRepoListPath != "" {
+		testRepoListVolumeArgs, err = buildKubeTestRepoListArgs(kubetestConfigDir, input.KubeTestRepoListPath)
+		if err != nil {
+			return err
+		}
+	}
+
 	e2eVars := map[string]string{
 		"kubeconfig":           "/tmp/kubeconfig",
 		"provider":             "skeleton",
@@ -141,7 +152,12 @@ func Run(ctx context.Context, input RunInput) error {
 		return errors.Wrap(err, "unable to determine current user")
 	}
 	userArg := user.Uid + ":" + user.Gid
-	e2eCmd := exec.Command("docker", "run", "--user", userArg, kubeConfigVolumeMount, outputVolumeMount, viperVolumeMount, "-t", input.ConformanceImage)
+	networkArg := "--network=kind"
+	e2eCmd := exec.Command("docker", "run", "--user", userArg, kubeConfigVolumeMount, outputVolumeMount, viperVolumeMount, "-t", networkArg)
+	if len(testRepoListVolumeArgs) > 0 {
+		e2eCmd.Args = append(e2eCmd.Args, testRepoListVolumeArgs...)
+	}
+	e2eCmd.Args = append(e2eCmd.Args, input.ConformanceImage)
 	e2eCmd.Args = append(e2eCmd.Args, "/usr/local/bin/ginkgo")
 	e2eCmd.Args = append(e2eCmd.Args, ginkgoArgs...)
 	e2eCmd.Args = append(e2eCmd.Args, "/usr/local/bin/e2e.test")
@@ -219,6 +235,11 @@ func volumeArg(src, dest string) string {
 	return volumeArg
 }
 
+func envArg(key, value string) string {
+	envArg := "-e" + key + "=" + value
+	return envArg
+}
+
 func versionToConformanceImage(kubernetesVersion string) string {
 	k8sVersion := strings.ReplaceAll(kubernetesVersion, "+", "_")
 	if isUsingCIArtifactsVersion(kubernetesVersion) {
@@ -236,4 +257,17 @@ func buildArgs(kv map[string]string, flagMarker string) []string {
 		i++
 	}
 	return args
+}
+
+func buildKubeTestRepoListArgs(kubetestConfigDir, kubeTestRepoListPath string) ([]string, error) {
+	args := make([]string, 2)
+
+	tmpKubeTestRepoListPath := path.Join(kubetestConfigDir, "repo_list.yaml")
+	if err := copyFile(kubeTestRepoListPath, tmpKubeTestRepoListPath); err != nil {
+		return nil, err
+	}
+	dest := "/tmp/repo_list.yaml"
+	args[0] = envArg("KUBE_TEST_REPO_LIST", dest)
+	args[1] = volumeArg(tmpKubeTestRepoListPath, dest)
+	return args, nil
 }

@@ -201,7 +201,7 @@ spec:
                     description: FeatureGates enabled by the user.
                     type: object
                   imageRepository:
-                    description: ImageRepository sets the container registry to pull images from. If empty, `k8s.gcr.io` will be used by default; in case of kubernetes version is a CI build (kubernetes version starts with `ci/` or `ci-cross/`) `gcr.io/kubernetes-ci-images` will be used as a default for control plane components and for kube-proxy, while `k8s.gcr.io` will be used for all the other images.
+                    description: ImageRepository sets the container registry to pull images from. If empty, `k8s.gcr.io` will be used by default; in case of kubernetes version is a CI build (kubernetes version starts with `ci/` or `ci-cross/`) `gcr.io/k8s-staging-ci-images` will be used as a default for control plane components and for kube-proxy, while `k8s.gcr.io` will be used for all the other images.
                     type: string
                   kind:
                     description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
@@ -899,7 +899,7 @@ spec:
                     description: FeatureGates enabled by the user.
                     type: object
                   imageRepository:
-                    description: ImageRepository sets the container registry to pull images from. If empty, `k8s.gcr.io` will be used by default; in case of kubernetes version is a CI build (kubernetes version starts with `ci/` or `ci-cross/`) `gcr.io/kubernetes-ci-images` will be used as a default for control plane components and for kube-proxy, while `k8s.gcr.io` will be used for all the other images.
+                    description: ImageRepository sets the container registry to pull images from. If empty, `k8s.gcr.io` will be used by default; in case of kubernetes version is a CI build (kubernetes version starts with `ci/` or `ci-cross/`) `gcr.io/k8s-staging-ci-images` will be used as a default for control plane components and for kube-proxy, while `k8s.gcr.io` will be used for all the other images.
                     type: string
                   kind:
                     description: 'Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
@@ -1359,10 +1359,6 @@ spec:
           status:
             description: KubeadmConfigStatus defines the observed state of KubeadmConfig
             properties:
-              bootstrapData:
-                description: "BootstrapData will be a cloud-init script for now. \n Deprecated: This field has been deprecated in v1alpha3 and will be removed in a future version. Switch to DataSecretName."
-                format: byte
-                type: string
               conditions:
                 description: Conditions defines current service state of the KubeadmConfig.
                 items:

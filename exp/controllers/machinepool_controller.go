@@ -51,9 +51,15 @@ import (
 // +kubebuilder:rbac:groups=exp.infrastructure.cluster.x-k8s.io;infrastructure.cluster.x-k8s.io;bootstrap.cluster.x-k8s.io,resources=*,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=exp.cluster.x-k8s.io,resources=machinepools;machinepools/status,verbs=get;list;watch;create;update;patch;delete
 
+const (
+	// MachinePoolControllerName defines the controller used when creating clients
+	MachinePoolControllerName = "machinepool-controller"
+)
+
 // MachinePoolReconciler reconciles a MachinePool object
 type MachinePoolReconciler struct {
-	Client client.Client
+	Client           client.Client
+	WatchFilterValue string
 
 	config           *rest.Config
 	controller       controller.Controller
@@ -70,7 +76,7 @@ func (r *MachinePoolReconciler) SetupWithManager(ctx context.Context, mgr ctrl.M
 	c, err := ctrl.NewControllerManagedBy(mgr).
 		For(&expv1.MachinePool{}).
 		WithOptions(options).
-		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
+		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
 		Build(r)
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
@@ -230,7 +236,7 @@ func (r *MachinePoolReconciler) reconcileDeleteNodes(ctx context.Context, cluste
 		return nil
 	}
 
-	clusterClient, err := remote.NewClusterClient(ctx, r.Client, util.ObjectKey(cluster))
+	clusterClient, err := remote.NewClusterClient(ctx, MachinePoolControllerName, r.Client, util.ObjectKey(cluster))
 	if err != nil {
 		return err
 	}

@@ -18,19 +18,17 @@ package controllers
 
 import (
 	"context"
-	"errors"
-
 	"github.com/blang/semver"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
-	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/machinefilters"
+	"sigs.k8s.io/cluster-api/util/collections"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type fakeManagementCluster struct {
 	// TODO: once all client interactions are moved to the Management cluster this can go away
 	Management *internal.Management
-	Machines   internal.FilterableMachineCollection
+	Machines   collections.Machines
 	Workload   fakeWorkloadCluster
 	Reader     client.Reader
 }
@@ -47,7 +45,7 @@ func (f *fakeManagementCluster) GetWorkloadCluster(_ context.Context, _ client.O
 	return f.Workload, nil
 }
 
-func (f *fakeManagementCluster) GetMachinesForCluster(c context.Context, n client.ObjectKey, filters ...machinefilters.Func) (internal.FilterableMachineCollection, error) {
+func (f *fakeManagementCluster) GetMachinesForCluster(c context.Context, n client.ObjectKey, filters ...collections.Func) (collections.Machines, error) {
 	if f.Management != nil {
 		return f.Management.GetMachinesForCluster(c, n, filters...)
 	}
@@ -56,17 +54,16 @@ func (f *fakeManagementCluster) GetMachinesForCluster(c context.Context, n clien
 
 type fakeWorkloadCluster struct {
 	*internal.Workload
-	Status              internal.ClusterStatus
-	ControlPlaneHealthy bool
-	EtcdHealthy         bool
+	Status            internal.ClusterStatus
+	EtcdMembersResult []string
 }
 
 func (f fakeWorkloadCluster) ForwardEtcdLeadership(_ context.Context, _ *clusterv1.Machine, _ *clusterv1.Machine) error {
 	return nil
 }
 
-func (f fakeWorkloadCluster) ReconcileEtcdMembers(ctx context.Context) error {
-	return nil
+func (f fakeWorkloadCluster) ReconcileEtcdMembers(ctx context.Context, nodeNames []string) ([]string, error) {
+	return nil, nil
 }
 
 func (f fakeWorkloadCluster) ClusterStatus(_ context.Context) (internal.ClusterStatus, error) {
@@ -97,18 +94,16 @@ func (f fakeWorkloadCluster) UpdateKubeletConfigMap(ctx context.Context, version
 	return nil
 }
 
-func (f fakeWorkloadCluster) ControlPlaneIsHealthy(ctx context.Context) (internal.HealthCheckResult, error) {
-	if !f.ControlPlaneHealthy {
-		return nil, errors.New("control plane is not healthy")
-	}
-	return nil, nil
+func (f fakeWorkloadCluster) RemoveEtcdMemberForMachine(ctx context.Context, machine *clusterv1.Machine) error {
+	return nil
 }
 
-func (f fakeWorkloadCluster) EtcdIsHealthy(ctx context.Context) (internal.HealthCheckResult, error) {
-	if !f.EtcdHealthy {
-		return nil, errors.New("etcd is not healthy")
-	}
-	return nil, nil
+func (f fakeWorkloadCluster) RemoveMachineFromKubeadmConfigMap(ctx context.Context, machine *clusterv1.Machine) error {
+	return nil
+}
+
+func (f fakeWorkloadCluster) EtcdMembers(_ context.Context) ([]string, error) {
+	return f.EtcdMembersResult, nil
 }
 
 type fakeMigrator struct {

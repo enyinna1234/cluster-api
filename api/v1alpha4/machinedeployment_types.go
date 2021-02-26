@@ -52,6 +52,8 @@ type MachineDeploymentSpec struct {
 
 	// Number of desired machines. Defaults to 1.
 	// This is a pointer to distinguish between explicit zero and not specified.
+	// +optional
+	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
 	// Label selector for machines. Existing MachineSets whose machines are
@@ -147,6 +149,13 @@ type MachineRollingUpdateDeployment struct {
 	// at any time during the update is at most 130% of desired machines.
 	// +optional
 	MaxSurge *intstr.IntOrString `json:"maxSurge,omitempty"`
+
+	// DeletePolicy defines the policy used by the MachineDeployment to identify nodes to delete when downscaling.
+	// Valid values are "Random, "Newest", "Oldest"
+	// When no value is supplied, the default DeletePolicy of MachineSet is used
+	// +kubebuilder:validation:Enum=Random;Newest;Oldest
+	// +optional
+	DeletePolicy *string `json:"deletePolicy,omitempty"`
 }
 
 // ANCHOR_END: MachineRollingUpdateDeployment

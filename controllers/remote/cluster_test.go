@@ -18,6 +18,7 @@ package remote
 
 import (
 	"testing"
+	"time"
 
 	. "github.com/onsi/gomega"
 
@@ -94,30 +95,32 @@ func TestNewClusterClient(t *testing.T) {
 	t.Run("cluster with valid kubeconfig", func(t *testing.T) {
 		gs := NewWithT(t)
 
-		client := fake.NewFakeClientWithScheme(testScheme, validSecret)
-		_, err := NewClusterClient(ctx, client, clusterWithValidKubeConfig)
+		client := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(validSecret).Build()
+		_, err := NewClusterClient(ctx, "test-source", client, clusterWithValidKubeConfig)
 		// Since we do not have a remote server to connect to, we should expect to get
 		// an error to that effect for the purpose of this test.
 		gs.Expect(err).To(MatchError(ContainSubstring("no such host")))
 
-		restConfig, err := RESTConfig(ctx, client, clusterWithValidKubeConfig)
+		restConfig, err := RESTConfig(ctx, "test-source", client, clusterWithValidKubeConfig)
 		gs.Expect(err).NotTo(HaveOccurred())
 		gs.Expect(restConfig.Host).To(Equal("https://test-cluster-api.nodomain.example.com:6443"))
+		gs.Expect(restConfig.UserAgent).To(MatchRegexp("remote.test/unknown test-source (.*) cluster.x-k8s.io/unknown"))
+		gs.Expect(restConfig.Timeout).To(Equal(10 * time.Second))
 	})
 
 	t.Run("cluster with no kubeconfig", func(t *testing.T) {
 		gs := NewWithT(t)
 
-		client := fake.NewFakeClientWithScheme(testScheme)
-		_, err := NewClusterClient(ctx, client, clusterWithNoKubeConfig)
+		client := fake.NewClientBuilder().WithScheme(testScheme).Build()
+		_, err := NewClusterClient(ctx, "test-source", client, clusterWithNoKubeConfig)
 		gs.Expect(err).To(MatchError(ContainSubstring("not found")))
 	})
 
 	t.Run("cluster with invalid kubeconfig", func(t *testing.T) {
 		gs := NewWithT(t)
 
-		client := fake.NewFakeClientWithScheme(testScheme, invalidSecret)
-		_, err := NewClusterClient(ctx, client, clusterWithInvalidKubeConfig)
+		client := fake.NewClientBuilder().WithScheme(testScheme).WithObjects(invalidSecret).Build()
+		_, err := NewClusterClient(ctx, "test-source", client, clusterWithInvalidKubeConfig)
 		gs.Expect(err).To(HaveOccurred())
 		gs.Expect(apierrors.IsNotFound(err)).To(BeFalse())
 	})

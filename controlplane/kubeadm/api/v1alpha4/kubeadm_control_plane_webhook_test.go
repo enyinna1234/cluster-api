@@ -133,7 +133,7 @@ func TestKubeadmControlPlaneValidateCreate(t *testing.T) {
 			kcp:       validVersion,
 		},
 		{
-			name:      "should succeed when given a valid semantic version without 'v'",
+			name:      "should error when given a valid semantic version without 'v'",
 			expectErr: true,
 			kcp:       invalidVersion2,
 		},
@@ -209,6 +209,14 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 						Path: "test",
 					},
 				},
+				Users: []bootstrapv1.User{
+					{
+						Name: "user",
+						SSHAuthorizedKeys: []string{
+							"ssh-rsa foo",
+						},
+					},
+				},
 			},
 			Version: "v1.16.6",
 		},
@@ -242,6 +250,15 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 		},
 	}
 	validUpdate.Spec.Version = "v1.17.1"
+	validUpdate.Spec.KubeadmConfigSpec.Users = []bootstrapv1.User{
+		{
+			Name: "bar",
+			SSHAuthorizedKeys: []string{
+				"ssh-rsa bar",
+				"ssh-rsa foo",
+			},
+		},
+	}
 	validUpdate.Spec.InfrastructureTemplate.Name = "orange"
 	validUpdate.Spec.Replicas = pointer.Int32Ptr(5)
 	now := metav1.NewTime(time.Now())
@@ -302,17 +319,24 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 
 	apiServer := before.DeepCopy()
 	apiServer.Spec.KubeadmConfigSpec.ClusterConfiguration.APIServer = kubeadmv1beta1.APIServer{
+		ControlPlaneComponent: kubeadmv1beta1.ControlPlaneComponent{
+			ExtraArgs:    map[string]string{"foo": "bar"},
+			ExtraVolumes: []kubeadmv1beta1.HostPathMount{{Name: "mount1"}},
+		},
 		TimeoutForControlPlane: &metav1.Duration{Duration: 5 * time.Minute},
+		CertSANs:               []string{"foo", "bar"},
 	}
 
 	controllerManager := before.DeepCopy()
 	controllerManager.Spec.KubeadmConfigSpec.ClusterConfiguration.ControllerManager = kubeadmv1beta1.ControlPlaneComponent{
-		ExtraArgs: map[string]string{"controller manager field": "controller manager value"},
+		ExtraArgs:    map[string]string{"controller manager field": "controller manager value"},
+		ExtraVolumes: []kubeadmv1beta1.HostPathMount{{Name: "mount", HostPath: "/foo", MountPath: "bar", ReadOnly: true, PathType: "File"}},
 	}
 
 	scheduler := before.DeepCopy()
 	scheduler.Spec.KubeadmConfigSpec.ClusterConfiguration.Scheduler = kubeadmv1beta1.ControlPlaneComponent{
-		ExtraArgs: map[string]string{"scheduler field": "scheduler value"},
+		ExtraArgs:    map[string]string{"scheduler field": "scheduler value"},
+		ExtraVolumes: []kubeadmv1beta1.HostPathMount{{Name: "mount", HostPath: "/foo", MountPath: "bar", ReadOnly: true, PathType: "File"}},
 	}
 
 	dns := before.DeepCopy()
@@ -433,6 +457,11 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 	withoutClusterConfiguration := before.DeepCopy()
 	withoutClusterConfiguration.Spec.KubeadmConfigSpec.ClusterConfiguration = nil
 
+	afterEtcdLocalDirAddition := before.DeepCopy()
+	afterEtcdLocalDirAddition.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local = &kubeadmv1beta1.LocalEtcd{
+		DataDir: "/data",
+	}
+
 	disallowedUpgrade118Prev := prevKCPWithVersion("v1.18.8")
 	disallowedUpgrade119Version := before.DeepCopy()
 	disallowedUpgrade119Version.Spec.Version = "v1.19.0"
@@ -546,20 +575,20 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 			kcp:       controlPlaneEndpoint,
 		},
 		{
-			name:      "should fail when making a change to the cluster config's apiServer",
-			expectErr: true,
+			name:      "should allow changes to the cluster config's apiServer",
+			expectErr: false,
 			before:    before,
 			kcp:       apiServer,
 		},
 		{
-			name:      "should fail when making a change to the cluster config's controllerManager",
-			expectErr: true,
+			name:      "should allow changes to the cluster config's controllerManager",
+			expectErr: false,
 			before:    before,
 			kcp:       controllerManager,
 		},
 		{
-			name:      "should fail when making a change to the cluster config's scheduler",
-			expectErr: true,
+			name:      "should allow changes to the cluster config's scheduler",
+			expectErr: false,
 			before:    before,
 			kcp:       scheduler,
 		},
@@ -676,6 +705,12 @@ func TestKubeadmControlPlaneValidateUpdate(t *testing.T) {
 			expectErr: false,
 			before:    withoutClusterConfiguration,
 			kcp:       withoutClusterConfiguration,
+		},
+		{
+			name:      "should fail if etcd local dir is changed from missing ClusterConfiguration",
+			expectErr: true,
+			before:    withoutClusterConfiguration,
+			kcp:       afterEtcdLocalDirAddition,
 		},
 		{
 			name:      "should fail when skipping control plane minor versions",

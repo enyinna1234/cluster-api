@@ -287,7 +287,7 @@ var _ = Describe("Cluster Reconciler", func() {
 				ClusterName: cluster.Name,
 				ProviderID:  pointer.StringPtr("aws:///id-node-1"),
 				Bootstrap: clusterv1.Bootstrap{
-					Data: pointer.StringPtr(""),
+					DataSecretName: pointer.StringPtr(""),
 				},
 			},
 		}
@@ -450,7 +450,7 @@ func TestClusterReconciler(t *testing.T) {
 				g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 				r := &ClusterReconciler{
-					Client: fake.NewFakeClientWithScheme(scheme.Scheme, cluster, controlPlaneWithNoderef, controlPlaneWithoutNoderef, nonControlPlaneWithNoderef, nonControlPlaneWithoutNoderef),
+					Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(cluster, controlPlaneWithNoderef, controlPlaneWithoutNoderef, nonControlPlaneWithNoderef, nonControlPlaneWithoutNoderef).Build(),
 				}
 				requests := r.controlPlaneMachineToCluster(tt.o)
 				g.Expect(requests).To(Equal(tt.want))

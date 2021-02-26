@@ -131,7 +131,7 @@ func (r *DockerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	}
 
 	// Create a helper for managing the docker container hosting the machine.
-	externalMachine, err := docker.NewMachine(cluster.Name, machine.Name, dockerMachine.Spec.CustomImage, nil, log)
+	externalMachine, err := docker.NewMachine(cluster.Name, machine.Name, dockerMachine.Spec.CustomImage, nil)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalMachine")
 	}
@@ -140,7 +140,7 @@ func (r *DockerMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	// NB. the machine controller has to manage the cluster load balancer because the current implementation of the
 	// docker load balancer does not support auto-discovery of control plane nodes, so CAPD should take care of
 	// updating the cluster load balancer configuration when control plane machines are added/removed
-	externalLoadBalancer, err := docker.NewLoadBalancer(cluster.Name, log)
+	externalLoadBalancer, err := docker.NewLoadBalancer(cluster.Name)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrapf(err, "failed to create helper for managing the externalLoadBalancer")
 	}
@@ -267,6 +267,12 @@ func (r *DockerMachineReconciler) reconcileNormal(ctx context.Context, cluster *
 			conditions.MarkFalse(dockerMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "Repeating bootstrap")
 			return ctrl.Result{}, errors.Wrap(err, "failed to exec DockerMachine bootstrap")
 		}
+		// Check for bootstrap success
+		if err := externalMachine.CheckForBootstrapSuccess(timeoutctx); err != nil {
+			conditions.MarkFalse(dockerMachine, infrav1.BootstrapExecSucceededCondition, infrav1.BootstrapFailedReason, clusterv1.ConditionSeverityWarning, "Repeating bootstrap")
+			return ctrl.Result{}, errors.Wrap(err, "failed to check for existence of bootstrap success file at /run/cluster-api/bootstrap-success.complete")
+		}
+
 		dockerMachine.Spec.Bootstrapped = true
 	}
 
@@ -299,6 +305,9 @@ func (r *DockerMachineReconciler) reconcileNormal(ctx context.Context, cluster *
 	// Requeue if there is an error, as this is likely momentary load balancer
 	// state changes during control plane provisioning.
 	if err := externalMachine.SetNodeProviderID(ctx); err != nil {
+		if errors.As(err, &docker.ContainerNotRunningError{}) {
+			return ctrl.Result{}, errors.Wrap(err, "failed to patch the Kubernetes node with the machine providerID")
+		}
 		log.Error(err, "failed to patch the Kubernetes node with the machine providerID")
 		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
 	}

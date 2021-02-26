@@ -49,10 +49,6 @@ please follow the additional instructions in the dedicated tab:
 {{#tabs name:"install-kind" tabs:"v0.9.x,Docker"}}
 {{#tab v0.9.x}}
 
-Export the variable **KIND_EXPERIMENTAL_DOCKER_NETWORK=bridge** to let kind run in the default **bridge** network:
-```bash
-export KIND_EXPERIMENTAL_DOCKER_NETWORK=bridge
-```
 Create the kind cluster:
 ```bash
 kind create cluster
@@ -96,7 +92,7 @@ Download the latest release; for example, to download version v0.3.0 on linux, t
 ```
 curl -L {{#releaselink gomodule:"sigs.k8s.io/cluster-api" asset:"clusterctl-linux-amd64" version:"0.3.x"}} -o clusterctl
 ```
-Make the kubectl binary executable.
+Make the clusterctl binary executable.
 ```
 chmod +x ./clusterctl
 ```
@@ -117,7 +113,7 @@ Download the latest release; for example, to download version v0.3.0 on macOS, t
 ```
 curl -L {{#releaselink gomodule:"sigs.k8s.io/cluster-api" asset:"clusterctl-darwin-amd64" version:"0.3.x"}} -o clusterctl
 ```
-Make the kubectl binary executable.
+Make the clusterctl binary executable.
 ```
 chmod +x ./clusterctl
 ```
@@ -378,9 +374,17 @@ See the [AWS provider prerequisites] document for more details.
 {{#/tab }}
 {{#tab Azure}}
 
+<aside class="note warning">
+
+<h1>Warning</h1>
+
+Make sure you choose a VM size which is available in the desired location for your subscription. To see available SKUs, use `az vm list-skus -l <your_location> -r virtualMachines -o table` 
+
+</aside>
+
 ```bash
-# Name of the Azure datacenter location.
-export AZURE_LOCATION="centralus"
+# Name of the Azure datacenter location. Change this value to your desired location.
+export AZURE_LOCATION="centralus" 
 
 # Select VM types.
 export AZURE_CONTROL_PLANE_MACHINE_TYPE="Standard_D2s_v3"
@@ -485,10 +489,6 @@ source /tmp/env.rc <path/to/clouds.yaml> <cloud>
 
 Apart from the script, the following OpenStack environment variables are required.
 ```bash
-# The IP address on which the API server is serving.
-export OPENSTACK_CONTROLPLANE_IP=<control plane ip>
-# The ID of an external OpenStack Network. This is necessary to get public internet to the VMs.
-export OPENSTACK_EXTERNAL_NETWORK_ID=<external network id>
 # The list of nameservers for OpenStack Subnet being created.
 # Set this value when you need create a new network/subnet while the access through DNS is required.
 export OPENSTACK_DNS_NAMESERVERS=<dns nameserver>
@@ -500,8 +500,8 @@ export OPENSTACK_CONTROL_PLANE_MACHINE_FLAVOR=<flavor>
 export OPENSTACK_NODE_MACHINE_FLAVOR=<flavor>
 # The name of the image to use for your server instance. If the RootVolume is specified, this will be ignored and use rootVolume directly.
 export OPENSTACK_IMAGE_NAME=<image name>
-# SSHAuthorizedKeys specifies a list of ssh authorized keys for the user
-export OPENSTACK_SSH_AUTHORIZED_KEY=<ssh key>
+# The SSH key pair name
+export OPENSTACK_SSH_KEY_NAME=<ssh key pair name>
 ```
 
 A full configuration reference can be found in [configuration.md](https://github.com/kubernetes-sigs/cluster-api-provider-openstack/blob/master/docs/configuration.md).
@@ -565,7 +565,7 @@ For the purpose of this tutorial, we'll name our cluster capi-quickstart.
 
 ```bash
 clusterctl config cluster capi-quickstart \
-  --kubernetes-version v1.19.1 \
+  --kubernetes-version v1.19.7 \
   --control-plane-machine-count=3 \
   --worker-machine-count=3 \
   > capi-quickstart.yaml
@@ -584,7 +584,7 @@ The Docker provider is not designed for production use and is intended for devel
 
 ```bash
 clusterctl config cluster capi-quickstart --flavor development \
-  --kubernetes-version v1.19.1 \
+  --kubernetes-version v1.19.7 \
   --control-plane-machine-count=3 \
   --worker-machine-count=3 \
   > capi-quickstart.yaml
@@ -628,6 +628,12 @@ The cluster will now start provisioning. You can check status with:
 kubectl get cluster --all-namespaces
 ```
 
+You can also get an "at glance" view of the cluster and its resources by running:
+
+```bash
+clusterctl describe cluster capi-quickstart
+```
+
 To verify the first control plane is up:
 
 ```bash
@@ -637,8 +643,8 @@ kubectl get kubeadmcontrolplane --all-namespaces
 You should see an output is similar to this:
 
 ```bash
-NAME                              READY   INITIALIZED   REPLICAS   READY REPLICAS   UPDATED REPLICAS   UNAVAILABLE REPLICAS
-capi-quickstart-control-plane             true          3                           3                  3
+NAME                            INITIALIZED   API SERVER AVAILABLE   VERSION   REPLICAS   READY   UPDATED   UNAVAILABLE
+capi-quickstart-control-plane   true                                 v1.19.7   3                  3         3
 ```
 
 <aside class="note warning">

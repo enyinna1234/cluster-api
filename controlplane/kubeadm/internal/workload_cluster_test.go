@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	. "github.com/onsi/gomega"
 
@@ -28,14 +29,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	cabpkv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
 	kubeadmv1beta1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -149,7 +148,7 @@ func TestUpdateKubeProxyImageInfo(t *testing.T) {
 			objects := []client.Object{
 				&tt.ds,
 			}
-			fakeClient := fake.NewFakeClientWithScheme(scheme, objects...)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -254,7 +253,7 @@ kind: ClusterStatus
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewFakeClientWithScheme(scheme, tt.objs...)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -311,7 +310,7 @@ func TestUpdateKubeletConfigMap(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewFakeClientWithScheme(scheme, tt.objs...)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -390,7 +389,7 @@ kubernetesVersion: v1.16.1
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewFakeClientWithScheme(scheme, tt.objs...)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -468,7 +467,7 @@ imageRepository: k8s.gcr.io
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			g := NewWithT(t)
-			fakeClient := fake.NewFakeClientWithScheme(scheme, tt.objs...)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -485,6 +484,357 @@ imageRepository: k8s.gcr.io
 				&actualConfig,
 			)).To(Succeed())
 			g.Expect(actualConfig.Data[clusterConfigurationKey]).To(ContainSubstring(tt.imageRepository))
+		})
+	}
+}
+
+func TestUpdateApiServerInKubeadmConfigMap(t *testing.T) {
+	validAPIServerConfig := `apiServer:
+  certSANs:
+  - foo
+  extraArgs:
+    foo: bar
+  extraVolumes:
+  - hostPath: /foo/bar
+    mountPath: /bar/baz
+    name: mount1
+  timeoutForControlPlane: 3m0s
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+`
+	kubeadmConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kubeadmConfigKey,
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			clusterConfigurationKey: validAPIServerConfig,
+		},
+	}
+
+	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
+	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
+
+	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
+	kubeadmConfigBadData.Data[clusterConfigurationKey] = `badConfigAPIServer`
+
+	g := NewWithT(t)
+	scheme := runtime.NewScheme()
+	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
+	tests := []struct {
+		name              string
+		apiServer         kubeadmv1beta1.APIServer
+		objs              []client.Object
+		expectErr         bool
+		expectedChanged   bool
+		expectedAPIServer string
+	}{
+		{
+			name:            "updates the config map",
+			apiServer:       kubeadmv1beta1.APIServer{CertSANs: []string{"foo", "bar"}},
+			objs:            []client.Object{kubeadmConfig},
+			expectErr:       false,
+			expectedChanged: true,
+			expectedAPIServer: `apiServer:
+  certSANs:
+  - foo
+  - bar
+apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+`,
+		},
+		{
+			name:              "returns error if cannot find config map",
+			expectErr:         true,
+			expectedAPIServer: validAPIServerConfig,
+		},
+		{
+			name:              "returns error if config has bad data",
+			objs:              []client.Object{kubeadmConfigBadData},
+			apiServer:         kubeadmv1beta1.APIServer{CertSANs: []string{"foo", "bar"}},
+			expectErr:         true,
+			expectedAPIServer: validAPIServerConfig,
+		},
+		{
+			name:              "returns error if config doesn't have cluster config key",
+			objs:              []client.Object{kubeadmConfigNoKey},
+			apiServer:         kubeadmv1beta1.APIServer{CertSANs: []string{"foo", "bar"}},
+			expectErr:         true,
+			expectedAPIServer: validAPIServerConfig,
+		},
+		{
+			name:            "should not update config map if no changes are detected",
+			objs:            []client.Object{kubeadmConfig},
+			expectedChanged: false,
+			apiServer: kubeadmv1beta1.APIServer{
+				ControlPlaneComponent: kubeadmv1beta1.ControlPlaneComponent{
+					ExtraArgs:    map[string]string{"foo": "bar"},
+					ExtraVolumes: []kubeadmv1beta1.HostPathMount{{Name: "mount1", HostPath: "/foo/bar", MountPath: "/bar/baz"}},
+				},
+				CertSANs:               []string{"foo"},
+				TimeoutForControlPlane: &metav1.Duration{Duration: 3 * time.Minute},
+			},
+			expectedAPIServer: validAPIServerConfig,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			w := &Workload{
+				Client: fakeClient,
+			}
+
+			err := w.UpdateAPIServerInKubeadmConfigMap(ctx, tt.apiServer)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+				return
+			}
+			g.Expect(err).ToNot(HaveOccurred())
+			var actualConfig corev1.ConfigMap
+			g.Expect(w.Client.Get(
+				ctx,
+				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
+				&actualConfig,
+			)).To(Succeed())
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.expectedAPIServer))
+
+			// check resource version to see if client.update was called or not
+			if !tt.expectedChanged {
+				g.Expect(tt.objs[0].GetResourceVersion()).Should(Equal(actualConfig.ResourceVersion))
+			} else {
+				g.Expect(tt.objs[0].GetResourceVersion()).ShouldNot(Equal(actualConfig.ResourceVersion))
+			}
+		})
+	}
+}
+
+func TestUpdateControllerManagerInKubeadmConfigMap(t *testing.T) {
+	validControllerManagerConfig := `apiVersion: kubeadm.k8s.io/v1beta2
+controllerManager:
+  extraArgs:
+    foo: bar
+  extraVolumes:
+  - hostPath: /foo/bar
+    mountPath: /bar/baz
+    name: mount1
+kind: ClusterConfiguration
+`
+	kubeadmConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kubeadmConfigKey,
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			clusterConfigurationKey: validControllerManagerConfig,
+		},
+	}
+
+	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
+	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
+
+	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
+	kubeadmConfigBadData.Data[clusterConfigurationKey] = `badConfigControllerManager`
+
+	g := NewWithT(t)
+	scheme := runtime.NewScheme()
+	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
+	tests := []struct {
+		name                      string
+		controllerManager         kubeadmv1beta1.ControlPlaneComponent
+		objs                      []client.Object
+		expectErr                 bool
+		expectedChanged           bool
+		expectedControllerManager string
+	}{
+		{
+			name:              "updates the config map",
+			controllerManager: kubeadmv1beta1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
+			objs:              []client.Object{kubeadmConfig},
+			expectErr:         false,
+			expectedChanged:   true,
+			expectedControllerManager: `apiVersion: kubeadm.k8s.io/v1beta2
+controllerManager:
+  extraArgs:
+    foo: bar
+kind: ClusterConfiguration
+`,
+		},
+		{
+			name:                      "returns error if cannot find config map",
+			expectErr:                 true,
+			expectedControllerManager: validControllerManagerConfig,
+		},
+		{
+			name:                      "returns error if config has bad data",
+			objs:                      []client.Object{kubeadmConfigBadData},
+			controllerManager:         kubeadmv1beta1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
+			expectErr:                 true,
+			expectedControllerManager: validControllerManagerConfig,
+		},
+		{
+			name:                      "returns error if config doesn't have cluster config key",
+			objs:                      []client.Object{kubeadmConfigNoKey},
+			controllerManager:         kubeadmv1beta1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
+			expectErr:                 true,
+			expectedControllerManager: validControllerManagerConfig,
+		},
+		{
+			name:            "should not update config map if no changes are detected",
+			objs:            []client.Object{kubeadmConfig},
+			expectedChanged: false,
+			controllerManager: kubeadmv1beta1.ControlPlaneComponent{
+				ExtraArgs:    map[string]string{"foo": "bar"},
+				ExtraVolumes: []kubeadmv1beta1.HostPathMount{{Name: "mount1", HostPath: "/foo/bar", MountPath: "/bar/baz"}},
+			},
+			expectedControllerManager: validControllerManagerConfig,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			w := &Workload{
+				Client: fakeClient,
+			}
+			err := w.UpdateControllerManagerInKubeadmConfigMap(ctx, tt.controllerManager)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+				return
+			}
+			g.Expect(err).ToNot(HaveOccurred())
+			var actualConfig corev1.ConfigMap
+			g.Expect(w.Client.Get(
+				ctx,
+				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
+				&actualConfig,
+			)).To(Succeed())
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.expectedControllerManager))
+
+			// check resource version to see if client.update was called or not
+			if !tt.expectedChanged {
+				g.Expect(tt.objs[0].GetResourceVersion()).Should(Equal(actualConfig.ResourceVersion))
+			} else {
+				g.Expect(tt.objs[0].GetResourceVersion()).ShouldNot(Equal(actualConfig.ResourceVersion))
+			}
+		})
+	}
+}
+
+func TestUpdateSchedulerInKubeadmConfigMap(t *testing.T) {
+	validSchedulerConfig := `apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+scheduler:
+  extraArgs:
+    foo: bar
+  extraVolumes:
+  - hostPath: /foo/bar
+    mountPath: /bar/baz
+    name: mount1
+`
+	kubeadmConfig := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      kubeadmConfigKey,
+			Namespace: metav1.NamespaceSystem,
+		},
+		Data: map[string]string{
+			clusterConfigurationKey: validSchedulerConfig,
+		},
+	}
+
+	kubeadmConfigNoKey := kubeadmConfig.DeepCopy()
+	delete(kubeadmConfigNoKey.Data, clusterConfigurationKey)
+
+	kubeadmConfigBadData := kubeadmConfig.DeepCopy()
+	kubeadmConfigBadData.Data[clusterConfigurationKey] = `badConfigScheduler`
+
+	g := NewWithT(t)
+	scheme := runtime.NewScheme()
+	g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
+	tests := []struct {
+		name              string
+		scheduler         kubeadmv1beta1.ControlPlaneComponent
+		objs              []client.Object
+		expectErr         bool
+		expectedChanged   bool
+		expectedScheduler string
+	}{
+		{
+			name:            "updates the config map",
+			scheduler:       kubeadmv1beta1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
+			objs:            []client.Object{kubeadmConfig},
+			expectErr:       false,
+			expectedChanged: true,
+			expectedScheduler: `apiVersion: kubeadm.k8s.io/v1beta2
+kind: ClusterConfiguration
+scheduler:
+  extraArgs:
+    foo: bar
+`,
+		},
+		{
+			name:              "returns error if cannot find config map",
+			expectErr:         true,
+			expectedScheduler: validSchedulerConfig,
+		},
+		{
+			name:              "returns error if config has bad data",
+			objs:              []client.Object{kubeadmConfigBadData},
+			scheduler:         kubeadmv1beta1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
+			expectErr:         true,
+			expectedScheduler: validSchedulerConfig,
+		},
+		{
+			name:              "returns error if config doesn't have cluster config key",
+			objs:              []client.Object{kubeadmConfigNoKey},
+			scheduler:         kubeadmv1beta1.ControlPlaneComponent{ExtraArgs: map[string]string{"foo": "bar"}},
+			expectErr:         true,
+			expectedScheduler: validSchedulerConfig,
+		},
+		{
+			name:            "should not update config map if no changes are detected",
+			objs:            []client.Object{kubeadmConfig},
+			expectedChanged: false,
+			scheduler: kubeadmv1beta1.ControlPlaneComponent{
+				ExtraArgs:    map[string]string{"foo": "bar"},
+				ExtraVolumes: []kubeadmv1beta1.HostPathMount{{Name: "mount1", HostPath: "/foo/bar", MountPath: "/bar/baz"}},
+			},
+			expectedScheduler: validSchedulerConfig,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := NewWithT(t)
+
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
+			w := &Workload{
+				Client: fakeClient,
+			}
+			err := w.UpdateSchedulerInKubeadmConfigMap(ctx, tt.scheduler)
+			if tt.expectErr {
+				g.Expect(err).To(HaveOccurred())
+				return
+			}
+			g.Expect(err).ToNot(HaveOccurred())
+			var actualConfig corev1.ConfigMap
+			g.Expect(w.Client.Get(
+				ctx,
+				client.ObjectKey{Name: kubeadmConfigKey, Namespace: metav1.NamespaceSystem},
+				&actualConfig,
+			)).To(Succeed())
+			g.Expect(actualConfig.Data[clusterConfigurationKey]).Should(Equal(tt.expectedScheduler))
+
+			// check resource version to see if client.update was called or not
+			if !tt.expectedChanged {
+				g.Expect(tt.objs[0].GetResourceVersion()).Should(Equal(actualConfig.ResourceVersion))
+			} else {
+				g.Expect(tt.objs[0].GetResourceVersion()).ShouldNot(Equal(actualConfig.ResourceVersion))
+			}
 		})
 	}
 }
@@ -549,7 +899,7 @@ func TestClusterStatus(t *testing.T) {
 			g := NewWithT(t)
 			scheme := runtime.NewScheme()
 			g.Expect(corev1.AddToScheme(scheme)).To(Succeed())
-			fakeClient := fake.NewFakeClientWithScheme(scheme, tt.objs...)
+			fakeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tt.objs...).Build()
 			w := &Workload{
 				Client: fakeClient,
 			}
@@ -611,166 +961,4 @@ func newKubeProxyDSWithImage(image string) appsv1.DaemonSet {
 	ds := newKubeProxyDS()
 	ds.Spec.Template.Spec.Containers[0].Image = image
 	return ds
-}
-
-func TestHealthCheck_NoError(t *testing.T) {
-	threeMachines := []*clusterv1.Machine{
-		controlPlaneMachine("one"),
-		controlPlaneMachine("two"),
-		controlPlaneMachine("three"),
-	}
-	controlPlane := createControlPlane(threeMachines)
-	tests := []struct {
-		name             string
-		checkResult      HealthCheckResult
-		controlPlaneName string
-		controlPlane     *ControlPlane
-	}{
-		{
-			name: "simple",
-			checkResult: HealthCheckResult{
-				"one":   nil,
-				"two":   nil,
-				"three": nil,
-			},
-			controlPlane: controlPlane,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := NewWithT(t)
-
-			g.Expect(tt.checkResult.Aggregate(controlPlane)).To(Succeed())
-		})
-	}
-}
-
-func TestManagementCluster_healthCheck_Errors(t *testing.T) {
-	tests := []struct {
-		name             string
-		checkResult      HealthCheckResult
-		clusterKey       ctrlclient.ObjectKey
-		controlPlaneName string
-		controlPlane     *ControlPlane
-		// expected errors will ensure the error contains this list of strings.
-		// If not supplied, no check on the error's value will occur.
-		expectedErrors []string
-	}{
-		{
-			name: "machine's node was not checked for health",
-			controlPlane: createControlPlane([]*clusterv1.Machine{
-				controlPlaneMachine("one"),
-				controlPlaneMachine("two"),
-				controlPlaneMachine("three"),
-			}),
-			checkResult: HealthCheckResult{
-				"one": nil,
-			},
-		},
-		{
-			name: "two nodes error on the check but no overall error occurred",
-			controlPlane: createControlPlane([]*clusterv1.Machine{
-				controlPlaneMachine("one"),
-				controlPlaneMachine("two"),
-				controlPlaneMachine("three")}),
-			checkResult: HealthCheckResult{
-				"one":   nil,
-				"two":   errors.New("two"),
-				"three": errors.New("three"),
-			},
-			expectedErrors: []string{"two", "three"},
-		},
-		{
-			name: "more nodes than machines were checked (out of band control plane nodes)",
-			controlPlane: createControlPlane([]*clusterv1.Machine{
-				controlPlaneMachine("one")}),
-			checkResult: HealthCheckResult{
-				"one":   nil,
-				"two":   nil,
-				"three": nil,
-			},
-		},
-		{
-			name: "a machine that has a nil node reference",
-			controlPlane: createControlPlane([]*clusterv1.Machine{
-				controlPlaneMachine("one"),
-				controlPlaneMachine("two"),
-				nilNodeRef(controlPlaneMachine("three"))}),
-			checkResult: HealthCheckResult{
-				"one":   nil,
-				"two":   nil,
-				"three": nil,
-			},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			g := NewWithT(t)
-
-			err := tt.checkResult.Aggregate(tt.controlPlane)
-			g.Expect(err).To(HaveOccurred())
-
-			for _, expectedError := range tt.expectedErrors {
-				g.Expect(err).To(MatchError(ContainSubstring(expectedError)))
-			}
-		})
-	}
-}
-func createControlPlane(machines []*clusterv1.Machine) *ControlPlane {
-	defaultInfra := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"kind":       "InfrastructureMachine",
-			"apiVersion": "infrastructure.cluster.x-k8s.io/v1alpha3",
-			"metadata": map[string]interface{}{
-				"name":      "infra-config1",
-				"namespace": "default",
-			},
-			"spec":   map[string]interface{}{},
-			"status": map[string]interface{}{},
-		},
-	}
-
-	fakeClient := fake.NewFakeClientWithScheme(runtime.NewScheme(), defaultInfra.DeepCopy())
-
-	controlPlane, _ := NewControlPlane(ctx, fakeClient, &clusterv1.Cluster{}, &v1alpha4.KubeadmControlPlane{}, NewFilterableMachineCollection(machines...))
-	return controlPlane
-}
-
-func controlPlaneMachine(name string) *clusterv1.Machine {
-	t := true
-	infraRef := &corev1.ObjectReference{
-		Kind:       "InfraKind",
-		APIVersion: "infrastructure.cluster.x-k8s.io/v1alpha3",
-		Name:       "infra",
-		Namespace:  "default",
-	}
-
-	return &clusterv1.Machine{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "default",
-			Name:      name,
-			Labels:    ControlPlaneLabelsForCluster("cluster-name"),
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					Kind:       "KubeadmControlPlane",
-					Name:       "control-plane-name",
-					Controller: &t,
-				},
-			},
-		},
-		Spec: clusterv1.MachineSpec{
-			InfrastructureRef: *infraRef.DeepCopy(),
-		},
-		Status: clusterv1.MachineStatus{
-			NodeRef: &corev1.ObjectReference{
-				Name: name,
-			},
-		},
-	}
-}
-
-func nilNodeRef(machine *clusterv1.Machine) *clusterv1.Machine {
-	machine.Status.NodeRef = nil
-	return machine
 }

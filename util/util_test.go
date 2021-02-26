@@ -39,54 +39,6 @@ var (
 	ctx = ctrl.SetupSignalHandler()
 )
 
-func TestParseMajorMinorPatch(t *testing.T) {
-	g := NewWithT(t)
-
-	var testcases = []struct {
-		name        string
-		input       string
-		output      semver.Version
-		expectError bool
-	}{
-		{
-			name:  "should parse an OCI compliant string",
-			input: "v1.2.16_foo-1",
-			output: semver.Version{
-				Major: 1,
-				Minor: 2,
-				Patch: 16,
-			},
-		},
-		{
-			name:  "should parse a valid semver",
-			input: "v1.16.6+foobar-0",
-			output: semver.Version{
-				Major: 1,
-				Minor: 16,
-				Patch: 6,
-			},
-		},
-		{
-			name:        "should error if there is no patch version",
-			input:       "v1.16+foobar-0",
-			expectError: true,
-		},
-		{
-			name:        "should error if there is no minor and patch",
-			input:       "v1+foobar-0",
-			expectError: true,
-		},
-	}
-
-	for _, tc := range testcases {
-		t.Run(tc.name, func(t *testing.T) {
-			out, err := ParseMajorMinorPatch(tc.input)
-			g.Expect(err != nil).To(Equal(tc.expectError))
-			g.Expect(out).To(Equal(tc.output))
-		})
-	}
-}
-
 func TestMachineToInfrastructureMapFunc(t *testing.T) {
 	g := NewWithT(t)
 
@@ -454,7 +406,11 @@ func TestGetOwnerClusterSuccessByName(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(scheme, myCluster)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(myCluster).
+		Build()
+
 	objm := metav1.ObjectMeta{
 		OwnerReferences: []metav1.OwnerReference{
 			{
@@ -490,7 +446,11 @@ func TestGetOwnerMachineSuccessByName(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(scheme, myMachine)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(myMachine).
+		Build()
+
 	objm := metav1.ObjectMeta{
 		OwnerReferences: []metav1.OwnerReference{
 			{
@@ -520,7 +480,11 @@ func TestGetOwnerMachineSuccessByNameFromDifferentVersion(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(scheme, myMachine)
+	c := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(myMachine).
+		Build()
+
 	objm := metav1.ObjectMeta{
 		OwnerReferences: []metav1.OwnerReference{
 			{
@@ -580,12 +544,11 @@ func TestGetMachinesForCluster(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(
-		scheme,
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
 		machine,
 		machineDifferentClusterNameSameNamespace,
 		machineSameClusterNameDifferentNamespace,
-	)
+	).Build()
 
 	machines, err := GetMachinesForCluster(ctx, c, cluster)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -784,7 +747,7 @@ func TestClusterToObjectsMapper(t *testing.T) {
 
 	for _, tc := range table {
 		tc.objects = append(tc.objects, cluster)
-		client := fake.NewFakeClientWithScheme(scheme, tc.objects...)
+		client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(tc.objects...).Build()
 		f, err := ClusterToObjectsMapper(client, tc.input, scheme)
 		g.Expect(err != nil, err).To(Equal(tc.expectError))
 		g.Expect(f(cluster)).To(ConsistOf(tc.output))

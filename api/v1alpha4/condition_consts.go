@@ -131,6 +131,12 @@ const (
 	// WaitingForRemediationReason is the reason used when a machine fails a health check and remediation is needed.
 	WaitingForRemediationReason = "WaitingForRemediation"
 
+	// RemediationFailedReason is the reason used when a remediation owner fails to remediate an unhealthy machine.
+	RemediationFailedReason = "RemediationFailed"
+
+	// RemediationInProgressReason is the reason used when an unhealthy machine is being remediated by the remediation owner.
+	RemediationInProgressReason = "RemediationInProgress"
+
 	// ExternalRemediationTemplateAvailable is set on machinehealthchecks when MachineHealthCheck controller uses external remediation.
 	// ExternalRemediationTemplateAvailable is set to false if external remediation template is not found.
 	ExternalRemediationTemplateAvailable ConditionType = "ExternalRemediationTemplateAvailable"
@@ -165,4 +171,16 @@ const (
 
 	// NodeConditionsFailedReason (Severity=Warning) documents a node is not in a healthy state due to the failed state of at least 1 Kubelet condition.
 	NodeConditionsFailedReason = "NodeConditionsFailed"
+)
+
+// Conditions and condition Reasons for the MachineHealthCheck object
+
+const (
+	// RemediationAllowedCondition is set on MachineHealthChecks to show the status of whether the MachineHealthCheck is
+	// allowed to remediate any Machines or whether it is blocked from remediating any further.
+	RemediationAllowedCondition ConditionType = "RemediationAllowed"
+
+	// TooManyUnhealthy is the reason used when too many Machines are unhealthy and the MachineHealthCheck is blocked
+	// from making any further remediations.
+	TooManyUnhealthyReason = "TooManyUnhealthy"
 )

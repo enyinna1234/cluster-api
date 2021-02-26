@@ -18,13 +18,13 @@ package controllers
 
 import (
 	"context"
-
 	"github.com/blang/semver"
 	"github.com/pkg/errors"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal"
 	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/collections"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
@@ -33,7 +33,7 @@ func (r *KubeadmControlPlaneReconciler) upgradeControlPlane(
 	cluster *clusterv1.Cluster,
 	kcp *controlplanev1.KubeadmControlPlane,
 	controlPlane *internal.ControlPlane,
-	machinesRequireUpgrade internal.FilterableMachineCollection,
+	machinesRequireUpgrade collections.Machines,
 ) (ctrl.Result, error) {
 	logger := controlPlane.Logger()
 
@@ -79,6 +79,20 @@ func (r *KubeadmControlPlaneReconciler) upgradeControlPlane(
 		meta := kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local.ImageMeta
 		if err := workloadCluster.UpdateEtcdVersionInKubeadmConfigMap(ctx, meta.ImageRepository, meta.ImageTag); err != nil {
 			return ctrl.Result{}, errors.Wrap(err, "failed to update the etcd version in the kubeadm config map")
+		}
+	}
+
+	if kcp.Spec.KubeadmConfigSpec.ClusterConfiguration != nil {
+		if err := workloadCluster.UpdateAPIServerInKubeadmConfigMap(ctx, kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.APIServer); err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "failed to update api server in the kubeadm config map")
+		}
+
+		if err := workloadCluster.UpdateControllerManagerInKubeadmConfigMap(ctx, kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.ControllerManager); err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "failed to update controller manager in the kubeadm config map")
+		}
+
+		if err := workloadCluster.UpdateSchedulerInKubeadmConfigMap(ctx, kcp.Spec.KubeadmConfigSpec.ClusterConfiguration.Scheduler); err != nil {
+			return ctrl.Result{}, errors.Wrap(err, "failed to update scheduler in the kubeadm config map")
 		}
 	}
 

@@ -48,11 +48,13 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 
 	//flags
-	metricsAddr          string
+	metricsBindAddr      string
 	enableLeaderElection bool
 	syncPeriod           time.Duration
 	concurrency          int
 	healthAddr           string
+	webhookPort          int
+	webhookCertDir       string
 )
 
 func init() {
@@ -66,6 +68,25 @@ func init() {
 	// +kubebuilder:scaffold:scheme
 }
 
+func initFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&metricsBindAddr, "metrics-bind-addr", ":8080",
+		"The address the metric endpoint binds to.")
+	fs.IntVar(&concurrency, "concurrency", 10,
+		"The number of docker machines to process simultaneously")
+	fs.BoolVar(&enableLeaderElection, "leader-elect", false,
+		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
+	fs.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
+		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
+	fs.StringVar(&healthAddr, "health-addr", ":9440",
+		"The address the health endpoint binds to.")
+	fs.IntVar(&webhookPort, "webhook-port", 9443,
+		"Webhook Server port")
+	fs.StringVar(&webhookCertDir, "webhook-cert-dir", "/tmp/k8s-webhook-server/serving-certs/",
+		"Webhook cert dir, only used when webhook-port is specified.")
+
+	feature.MutableGates.AddFlag(fs)
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
@@ -77,12 +98,13 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 myscheme,
-		MetricsBindAddress:     metricsAddr,
+		MetricsBindAddress:     metricsBindAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "controller-leader-election-capd",
 		SyncPeriod:             &syncPeriod,
 		HealthProbeBindAddress: healthAddr,
-		Port:                   9443,
+		Port:                   webhookPort,
+		CertDir:                webhookCertDir,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -102,17 +124,6 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
-}
-
-func initFlags(fs *pflag.FlagSet) {
-	fs.StringVar(&metricsAddr, "metrics-addr", ":8080", "The address the metric endpoint binds to.")
-	fs.IntVar(&concurrency, "concurrency", 10, "The number of docker machines to process simultaneously")
-	fs.BoolVar(&enableLeaderElection, "enable-leader-election", false,
-		"Enable leader election for controller manager. Enabling this will ensure there is only one active controller manager.")
-	fs.DurationVar(&syncPeriod, "sync-period", 10*time.Minute,
-		"The minimum interval at which watched resources are reconciled (e.g. 15m)")
-	fs.StringVar(&healthAddr, "health-addr", ":9440", "The address the health endpoint binds to.")
-	feature.MutableGates.AddFlag(fs)
 }
 
 func setupChecks(mgr ctrl.Manager) {

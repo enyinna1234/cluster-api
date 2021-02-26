@@ -19,7 +19,6 @@ package v1alpha4
 import (
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/blang/semver"
@@ -30,8 +29,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	kubeadmv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/types/v1beta1"
-	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/container"
+	"sigs.k8s.io/cluster-api/util/version"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 )
@@ -47,8 +46,6 @@ func (in *KubeadmControlPlane) SetupWebhookWithManager(mgr ctrl.Manager) error {
 
 var _ webhook.Defaulter = &KubeadmControlPlane{}
 var _ webhook.Validator = &KubeadmControlPlane{}
-
-var kubeSemver = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-0-9a-zA-Z_\.+]*)?$`)
 
 // Default implements webhook.Defaulter so a webhook will be registered for the type
 func (in *KubeadmControlPlane) Default() {
@@ -87,6 +84,10 @@ const (
 	preKubeadmCommands   = "preKubeadmCommands"
 	postKubeadmCommands  = "postKubeadmCommands"
 	files                = "files"
+	users                = "users"
+	apiServer            = "apiServer"
+	controllerManager    = "controllerManager"
+	scheduler            = "scheduler"
 )
 
 // ValidateUpdate implements webhook.Validator so a webhook will be registered for the type
@@ -100,12 +101,16 @@ func (in *KubeadmControlPlane) ValidateUpdate(old runtime.Object) error {
 		{spec, kubeadmConfigSpec, clusterConfiguration, "dns", "imageRepository"},
 		{spec, kubeadmConfigSpec, clusterConfiguration, "dns", "imageTag"},
 		{spec, kubeadmConfigSpec, clusterConfiguration, "imageRepository"},
+		{spec, kubeadmConfigSpec, clusterConfiguration, apiServer, "*"},
+		{spec, kubeadmConfigSpec, clusterConfiguration, controllerManager, "*"},
+		{spec, kubeadmConfigSpec, clusterConfiguration, scheduler, "*"},
 		{spec, kubeadmConfigSpec, initConfiguration, nodeRegistration, "*"},
 		{spec, kubeadmConfigSpec, joinConfiguration, nodeRegistration, "*"},
 		{spec, kubeadmConfigSpec, preKubeadmCommands},
 		{spec, kubeadmConfigSpec, postKubeadmCommands},
 		{spec, kubeadmConfigSpec, files},
 		{spec, kubeadmConfigSpec, "verbosity"},
+		{spec, kubeadmConfigSpec, users},
 		{spec, "infrastructureTemplate", "name"},
 		{spec, "replicas"},
 		{spec, "version"},
@@ -260,7 +265,7 @@ func (in *KubeadmControlPlane) validateCommon() (allErrs field.ErrorList) {
 		)
 	}
 
-	if !kubeSemver.MatchString(in.Spec.Version) {
+	if !version.KubeSemver.MatchString(in.Spec.Version) {
 		allErrs = append(allErrs, field.Invalid(field.NewPath("spec", "version"), in.Spec.Version, "must be a valid semantic version"))
 	}
 
@@ -300,7 +305,7 @@ func (in *KubeadmControlPlane) validateCoreDNSVersion(prev *KubeadmControlPlane)
 		return allErrs
 	}
 
-	fromVersion, err := util.ParseMajorMinorPatch(prev.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageTag)
+	fromVersion, err := version.ParseMajorMinorPatchTolerant(prev.Spec.KubeadmConfigSpec.ClusterConfiguration.DNS.ImageTag)
 	if err != nil {
 		allErrs = append(allErrs,
 			field.InternalError(
@@ -311,7 +316,7 @@ func (in *KubeadmControlPlane) validateCoreDNSVersion(prev *KubeadmControlPlane)
 		return allErrs
 	}
 
-	toVersion, err := util.ParseMajorMinorPatch(targetDNS.ImageTag)
+	toVersion, err := version.ParseMajorMinorPatchTolerant(targetDNS.ImageTag)
 	if err != nil {
 		allErrs = append(allErrs,
 			field.Invalid(
@@ -363,7 +368,7 @@ func (in *KubeadmControlPlane) validateEtcd(prev *KubeadmControlPlane) (allErrs 
 	}
 
 	// update validations
-	if prev != nil {
+	if prev != nil && prev.Spec.KubeadmConfigSpec.ClusterConfiguration != nil {
 		if in.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.External != nil && prev.Spec.KubeadmConfigSpec.ClusterConfiguration.Etcd.Local != nil {
 			allErrs = append(
 				allErrs,
@@ -389,7 +394,7 @@ func (in *KubeadmControlPlane) validateEtcd(prev *KubeadmControlPlane) (allErrs 
 }
 
 func (in *KubeadmControlPlane) validateVersion(previousVersion string) (allErrs field.ErrorList) {
-	fromVersion, err := util.ParseMajorMinorPatch(previousVersion)
+	fromVersion, err := version.ParseMajorMinorPatch(previousVersion)
 	if err != nil {
 		allErrs = append(allErrs,
 			field.InternalError(
@@ -400,7 +405,7 @@ func (in *KubeadmControlPlane) validateVersion(previousVersion string) (allErrs 
 		return allErrs
 	}
 
-	toVersion, err := util.ParseMajorMinorPatch(in.Spec.Version)
+	toVersion, err := version.ParseMajorMinorPatch(in.Spec.Version)
 	if err != nil {
 		allErrs = append(allErrs,
 			field.InternalError(

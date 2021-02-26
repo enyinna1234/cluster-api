@@ -51,11 +51,6 @@ func (in *Bootstrap) DeepCopyInto(out *Bootstrap) {
 		*out = new(v1.ObjectReference)
 		**out = **in
 	}
-	if in.Data != nil {
-		in, out := &in.Data, &out.Data
-		*out = new(string)
-		**out = **in
-	}
 	if in.DataSecretName != nil {
 		in, out := &in.DataSecretName, &out.DataSecretName
 		*out = new(string)
@@ -674,6 +669,11 @@ func (in *MachineRollingUpdateDeployment) DeepCopyInto(out *MachineRollingUpdate
 	if in.MaxSurge != nil {
 		in, out := &in.MaxSurge, &out.MaxSurge
 		*out = new(intstr.IntOrString)
+		**out = **in
+	}
+	if in.DeletePolicy != nil {
+		in, out := &in.DeletePolicy, &out.DeletePolicy
+		*out = new(string)
 		**out = **in
 	}
 }

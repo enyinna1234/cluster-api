@@ -21,30 +21,35 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"sigs.k8s.io/cluster-api/util/collections"
 	"time"
 
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/client-go/kubernetes/scheme"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controllers/remote"
-	"sigs.k8s.io/cluster-api/controlplane/kubeadm/internal/machinefilters"
 	"sigs.k8s.io/cluster-api/util/secret"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	// KubeadmControlPlaneControllerName defines the controller used when creating clients
+	KubeadmControlPlaneControllerName = "kubeadm-controlplane-controller"
 )
 
 // ManagementCluster defines all behaviors necessary for something to function as a management cluster.
 type ManagementCluster interface {
 	ctrlclient.Reader
 
-	GetMachinesForCluster(ctx context.Context, cluster client.ObjectKey, filters ...machinefilters.Func) (FilterableMachineCollection, error)
+	GetMachinesForCluster(ctx context.Context, cluster client.ObjectKey, filters ...collections.Func) (collections.Machines, error)
 	GetWorkloadCluster(ctx context.Context, clusterKey client.ObjectKey) (WorkloadCluster, error)
 }
 
 // Management holds operations on the management cluster.
 type Management struct {
-	Client ctrlclient.Reader
+	Client  ctrlclient.Reader
+	Tracker *remote.ClusterCacheTracker
 }
 
 // RemoteClusterConnectionError represents a failure to connect to a remote cluster
@@ -68,7 +73,7 @@ func (m *Management) List(ctx context.Context, list client.ObjectList, opts ...c
 
 // GetMachinesForCluster returns a list of machines that can be filtered or not.
 // If no filter is supplied then all machines associated with the target cluster are returned.
-func (m *Management) GetMachinesForCluster(ctx context.Context, cluster client.ObjectKey, filters ...machinefilters.Func) (FilterableMachineCollection, error) {
+func (m *Management) GetMachinesForCluster(ctx context.Context, cluster client.ObjectKey, filters ...collections.Func) (collections.Machines, error) {
 	selector := map[string]string{
 		clusterv1.ClusterLabelName: cluster.Name,
 	}
@@ -77,7 +82,7 @@ func (m *Management) GetMachinesForCluster(ctx context.Context, cluster client.O
 		return nil, errors.Wrap(err, "failed to list machines")
 	}
 
-	machines := NewFilterableMachineCollectionFromMachineList(ml)
+	machines := collections.FromMachineList(ml)
 	return machines.Filter(filters...), nil
 }
 
@@ -86,15 +91,19 @@ func (m *Management) GetMachinesForCluster(ctx context.Context, cluster client.O
 func (m *Management) GetWorkloadCluster(ctx context.Context, clusterKey client.ObjectKey) (WorkloadCluster, error) {
 	// TODO(chuckha): Inject this dependency.
 	// TODO(chuckha): memoize this function. The workload client only exists as long as a reconciliation loop.
-	restConfig, err := remote.RESTConfig(ctx, m.Client, clusterKey)
+	restConfig, err := remote.RESTConfig(ctx, KubeadmControlPlaneControllerName, m.Client, clusterKey)
 	if err != nil {
 		return nil, err
 	}
 	restConfig.Timeout = 30 * time.Second
 
-	c, err := client.New(restConfig, client.Options{Scheme: scheme.Scheme})
+	if m.Tracker == nil {
+		return nil, errors.New("Cannot get WorkloadCluster: No remote Cluster Cache")
+	}
+
+	c, err := m.Tracker.GetClient(ctx, clusterKey)
 	if err != nil {
-		return nil, &RemoteClusterConnectionError{Name: clusterKey.String(), Err: err}
+		return nil, err
 	}
 
 	// Retrieves the etcd CA key Pair
@@ -123,18 +132,15 @@ func (m *Management) GetWorkloadCluster(ctx context.Context, clusterKey client.O
 
 	caPool := x509.NewCertPool()
 	caPool.AppendCertsFromPEM(crtData)
-	cfg := &tls.Config{
+	tlsConfig := &tls.Config{
 		RootCAs:      caPool,
 		Certificates: []tls.Certificate{clientCert},
 	}
-	cfg.InsecureSkipVerify = true
+	tlsConfig.InsecureSkipVerify = true
 	return &Workload{
-		Client:          c,
-		CoreDNSMigrator: &CoreDNSMigrator{},
-		etcdClientGenerator: &etcdClientGenerator{
-			restConfig: restConfig,
-			tlsConfig:  cfg,
-		},
+		Client:              c,
+		CoreDNSMigrator:     &CoreDNSMigrator{},
+		etcdClientGenerator: NewEtcdClientGenerator(restConfig, tlsConfig),
 	}, nil
 }
 

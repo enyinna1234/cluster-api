@@ -29,7 +29,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/klog/klogr"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	"sigs.k8s.io/cluster-api/controllers/external"
 	"sigs.k8s.io/cluster-api/util"
@@ -317,13 +316,12 @@ func TestMachineSetOwnerReference(t *testing.T) {
 			g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 			msr := &MachineSetReconciler{
-				Client: fake.NewFakeClientWithScheme(
-					scheme.Scheme,
+				Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(
 					testCluster,
 					ms1,
 					ms2,
 					ms3,
-				),
+				).Build(),
 				recorder: record.NewFakeRecorder(32),
 			}
 
@@ -370,7 +368,7 @@ func TestMachineSetReconcile(t *testing.T) {
 		g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 		msr := &MachineSetReconciler{
-			Client:   fake.NewFakeClientWithScheme(scheme.Scheme, testCluster, ms),
+			Client:   fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(testCluster, ms).Build(),
 			recorder: record.NewFakeRecorder(32),
 		}
 		result, err := msr.Reconcile(ctx, request)
@@ -394,7 +392,7 @@ func TestMachineSetReconcile(t *testing.T) {
 
 		rec := record.NewFakeRecorder(32)
 		msr := &MachineSetReconciler{
-			Client:   fake.NewFakeClientWithScheme(scheme.Scheme, testCluster, ms),
+			Client:   fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(testCluster, ms).Build(),
 			recorder: rec,
 		}
 		_, _ = msr.Reconcile(ctx, request)
@@ -484,7 +482,7 @@ func TestMachineSetToMachines(t *testing.T) {
 	g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	r := &MachineSetReconciler{
-		Client: fake.NewFakeClientWithScheme(scheme.Scheme, append(machineSetList, &m, &m2, &m3)...),
+		Client: fake.NewClientBuilder().WithObjects(append(machineSetList, &m, &m2, &m3)...).Build(),
 	}
 
 	for _, tc := range testsCases {
@@ -577,15 +575,14 @@ func TestShouldExcludeMachine(t *testing.T) {
 					},
 				},
 			},
-			expected: true,
+			expected: false,
 		},
 	}
 
-	logger := klogr.New()
 	for _, tc := range testCases {
 		g := NewWithT(t)
 
-		got := shouldExcludeMachine(&tc.machineSet, &tc.machine, logger)
+		got := shouldExcludeMachine(&tc.machineSet, &tc.machine)
 
 		g.Expect(got).To(Equal(tc.expected))
 	}
@@ -630,7 +627,7 @@ func TestAdoptOrphan(t *testing.T) {
 	g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	r := &MachineSetReconciler{
-		Client: fake.NewFakeClientWithScheme(scheme.Scheme, &m),
+		Client: fake.NewClientBuilder().WithScheme(scheme.Scheme).WithObjects(&m).Build(),
 	}
 	for _, tc := range testCases {
 		g.Expect(r.adoptOrphan(ctx, tc.machineSet.DeepCopy(), tc.machine.DeepCopy())).To(Succeed())

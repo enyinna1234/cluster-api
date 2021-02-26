@@ -47,7 +47,7 @@ func TestAPIs(t *testing.T) {
 		[]Reporter{printer.NewlineReporter{}})
 }
 
-var _ = BeforeSuite(func(done Done) {
+var _ = BeforeSuite(func() {
 	By("bootstrapping test environment")
 	testEnv = helpers.NewTestEnvironment()
 	trckr, err := remote.NewClusterCacheTracker(log.NullLogger{}, testEnv.Manager)
@@ -62,10 +62,11 @@ var _ = BeforeSuite(func(done Done) {
 
 	By("starting the manager")
 	go func() {
+		defer GinkgoRecover()
 		Expect(testEnv.StartManager(ctx)).To(Succeed())
 	}()
 
-	close(done)
+	<-testEnv.Manager.Elected()
 }, 60)
 
 var _ = AfterSuite(func() {

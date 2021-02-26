@@ -29,7 +29,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
@@ -61,12 +60,13 @@ var (
 
 // ClusterResourceSetReconciler reconciles a ClusterResourceSet object
 type ClusterResourceSetReconciler struct {
-	Client  client.Client
-	Tracker *remote.ClusterCacheTracker
+	Client           client.Client
+	Tracker          *remote.ClusterCacheTracker
+	WatchFilterValue string
 }
 
 func (r *ClusterResourceSetReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager, options controller.Options) error {
-	_, err := ctrl.NewControllerManagedBy(mgr).
+	err := ctrl.NewControllerManagedBy(mgr).
 		For(&addonsv1.ClusterResourceSet{}).
 		Watches(
 			&source.Kind{Type: &clusterv1.Cluster{}},
@@ -75,6 +75,7 @@ func (r *ClusterResourceSetReconciler) SetupWithManager(ctx context.Context, mgr
 		Watches(
 			&source.Kind{Type: &corev1.ConfigMap{}},
 			handler.EnqueueRequestsFromMapFunc(r.resourceToClusterResourceSet),
+			builder.OnlyMetadata,
 			builder.WithPredicates(
 				resourcepredicates.ResourceCreate(ctrl.LoggerFrom(ctx)),
 			),
@@ -82,13 +83,14 @@ func (r *ClusterResourceSetReconciler) SetupWithManager(ctx context.Context, mgr
 		Watches(
 			&source.Kind{Type: &corev1.Secret{}},
 			handler.EnqueueRequestsFromMapFunc(r.resourceToClusterResourceSet),
+			builder.OnlyMetadata,
 			builder.WithPredicates(
 				resourcepredicates.AddonsSecretCreate(ctrl.LoggerFrom(ctx)),
 			),
 		).
 		WithOptions(options).
-		WithEventFilter(predicates.ResourceNotPaused(ctrl.LoggerFrom(ctx))).
-		Build(r)
+		WithEventFilter(predicates.ResourceNotPausedAndHasFilterLabel(ctrl.LoggerFrom(ctx), r.WatchFilterValue)).
+		Complete(r)
 
 	if err != nil {
 		return errors.Wrap(err, "failed setting up with a controller manager")
@@ -231,7 +233,6 @@ func (r *ClusterResourceSetReconciler) getClustersByClusterResourceSetSelector(c
 // TODO: If a resource already exists in the cluster but not applied by ClusterResourceSet, the resource will be updated ?
 func (r *ClusterResourceSetReconciler) ApplyClusterResourceSet(ctx context.Context, cluster *clusterv1.Cluster, clusterResourceSet *addonsv1.ClusterResourceSet) error {
 	log := ctrl.LoggerFrom(ctx, "cluster", cluster.Name)
-	log.Info("Applying ClusterResourceSet to cluster")
 
 	remoteClient, err := r.Tracker.GetClient(ctx, util.ObjectKey(cluster))
 	if err != nil {
@@ -384,16 +385,16 @@ func (r *ClusterResourceSetReconciler) getResource(ctx context.Context, resource
 		if resourceSecret.Type != addonsv1.ClusterResourceSetSecretType {
 			return nil, ErrSecretTypeNotSupported
 		}
-
 		resourceInterface = resourceSecret.DeepCopyObject()
 	}
 
-	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(resourceInterface)
+	raw := &unstructured.Unstructured{}
+	err := r.Client.Scheme().Convert(resourceInterface, raw, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return &unstructured.Unstructured{Object: raw}, nil
+	return raw, nil
 }
 
 // patchOwnerRefToResource adds the ClusterResourceSet as a OwnerReference to the resource.

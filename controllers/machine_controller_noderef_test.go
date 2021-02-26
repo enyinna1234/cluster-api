@@ -37,7 +37,7 @@ func TestGetNodeReference(t *testing.T) {
 	g.Expect(clusterv1.AddToScheme(scheme.Scheme)).To(Succeed())
 
 	r := &MachineReconciler{
-		Client:   fake.NewFakeClientWithScheme(scheme.Scheme),
+		Client:   fake.NewClientBuilder().WithScheme(scheme.Scheme).Build(),
 		recorder: record.NewFakeRecorder(32),
 	}
 
@@ -68,7 +68,7 @@ func TestGetNodeReference(t *testing.T) {
 		},
 	}
 
-	client := fake.NewFakeClientWithScheme(scheme.Scheme, nodeList...)
+	client := fake.NewClientBuilder().WithObjects(nodeList...).Build()
 
 	testCases := []struct {
 		name       string

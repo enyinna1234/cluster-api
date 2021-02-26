@@ -17,6 +17,7 @@ limitations under the License.
 package internal
 
 import (
+	"sigs.k8s.io/cluster-api/util/collections"
 	"testing"
 
 	. "github.com/onsi/gomega"
@@ -28,6 +29,7 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1alpha4"
 	bootstrapv1 "sigs.k8s.io/cluster-api/bootstrap/kubeadm/api/v1alpha4"
 	controlplanev1 "sigs.k8s.io/cluster-api/controlplane/kubeadm/api/v1alpha4"
+	"sigs.k8s.io/cluster-api/util/conditions"
 )
 
 func TestControlPlane(t *testing.T) {
@@ -46,7 +48,7 @@ func TestControlPlane(t *testing.T) {
 					},
 				},
 			},
-			Machines: FilterableMachineCollection{
+			Machines: collections.Machines{
 				"machine-1": machine("machine-1", withFailureDomain("one")),
 				"machine-2": machine("machine-2", withFailureDomain("two")),
 				"machine-3": machine("machine-3", withFailureDomain("two")),
@@ -92,6 +94,35 @@ func TestControlPlane(t *testing.T) {
 	})
 }
 
+func TestHasUnhealthyMachine(t *testing.T) {
+	// healthy machine (without MachineHealthCheckSucceded condition)
+	healthyMachine1 := &clusterv1.Machine{}
+	// healthy machine (with MachineHealthCheckSucceded == true)
+	healthyMachine2 := &clusterv1.Machine{}
+	conditions.MarkTrue(healthyMachine2, clusterv1.MachineHealthCheckSuccededCondition)
+	// unhealthy machine NOT eligible for KCP remediation (with MachineHealthCheckSucceded == False, but without MachineOwnerRemediated condition)
+	unhealthyMachineNOTOwnerRemediated := &clusterv1.Machine{}
+	conditions.MarkFalse(unhealthyMachineNOTOwnerRemediated, clusterv1.MachineHealthCheckSuccededCondition, clusterv1.MachineHasFailureReason, clusterv1.ConditionSeverityWarning, "")
+	// unhealthy machine eligible for KCP remediation (with MachineHealthCheckSucceded == False, with MachineOwnerRemediated condition)
+	unhealthyMachineOwnerRemediated := &clusterv1.Machine{}
+	conditions.MarkFalse(unhealthyMachineOwnerRemediated, clusterv1.MachineHealthCheckSuccededCondition, clusterv1.MachineHasFailureReason, clusterv1.ConditionSeverityWarning, "")
+	conditions.MarkFalse(unhealthyMachineOwnerRemediated, clusterv1.MachineOwnerRemediatedCondition, clusterv1.WaitingForRemediationReason, clusterv1.ConditionSeverityWarning, "")
+
+	c := ControlPlane{
+		Machines: collections.FromMachines(
+			healthyMachine1,
+			healthyMachine2,
+			unhealthyMachineNOTOwnerRemediated,
+			unhealthyMachineOwnerRemediated,
+		),
+	}
+
+	g := NewWithT(t)
+	g.Expect(c.HasUnhealthyMachine()).To(BeTrue())
+}
+
+type machineOpt func(*clusterv1.Machine)
+
 func failureDomain(controlPlane bool) clusterv1.FailureDomainSpec {
 	return clusterv1.FailureDomainSpec{
 		ControlPlane: controlPlane,
@@ -102,4 +133,16 @@ func withFailureDomain(fd string) machineOpt {
 	return func(m *clusterv1.Machine) {
 		m.Spec.FailureDomain = &fd
 	}
+}
+
+func machine(name string, opts ...machineOpt) *clusterv1.Machine {
+	m := &clusterv1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }

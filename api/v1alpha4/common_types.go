@@ -31,12 +31,37 @@ const (
 	// tool uses this label for implementing provider's lifecycle operations.
 	ProviderLabelName = "cluster.x-k8s.io/provider"
 
+	// ClusterNameAnnotation is the annotation set on nodes identifying the name of the cluster the node belongs to.
+	ClusterNameAnnotation = "cluster.x-k8s.io/cluster-name"
+
+	// ClusterNamespaceAnnotation is the annotation set on nodes identifying the namespace of the cluster the node belongs to.
+	ClusterNamespaceAnnotation = "cluster.x-k8s.io/cluster-namespace"
+
+	// MachineAnnotation is the annotation set on nodes identifying the machine the node belongs to.
+	MachineAnnotation = "cluster.x-k8s.io/machine"
+
+	// OwnerKindAnnotation is the annotation set on nodes identifying the owner kind.
+	OwnerKindAnnotation = "cluster.x-k8s.io/owner-kind"
+
+	// OwnerNameAnnotation is the annotation set on nodes identifying the owner name.
+	OwnerNameAnnotation = "cluster.x-k8s.io/owner-name"
+
 	// PausedAnnotation is an annotation that can be applied to any Cluster API
 	// object to prevent a controller from processing a resource.
 	//
 	// Controllers working with Cluster API objects must check the existence of this annotation
 	// on the reconciled object.
 	PausedAnnotation = "cluster.x-k8s.io/paused"
+
+	// WatchLabel is a label othat can be applied to any Cluster API object.
+	//
+	// Controllers which allow for selective reconciliation may check this label and proceed
+	// with reconciliation of the object only if this label and a configured value is present.
+	WatchLabel = "cluster.x-k8s.io/watch-filter"
+
+	// DeleteMachineAnnotation marks control plane and worker nodes that will be given priority for deletion
+	// when KCP or a machineset scales down. This annotation is given top priority on all delete policies.
+	DeleteMachineAnnotation = "cluster.x-k8s.io/delete-machine"
 
 	// TemplateClonedFromNameAnnotation is the infrastructure machine annotation that stores the name of the infrastructure template resource
 	// that was cloned for the machine. This annotation is set only during cloning a template. Older/adopted machines will not have this annotation.
@@ -46,8 +71,14 @@ const (
 	// that was cloned for the machine. This annotation is set only during cloning a template. Older/adopted machines will not have this annotation.
 	TemplateClonedFromGroupKindAnnotation = "cluster.x-k8s.io/cloned-from-groupkind"
 
+	// MachineSkipRemediationAnnotation is the annotation used to mark the machines that should not be considered for remediation by MachineHealthCheck reconciler.
+	MachineSkipRemediationAnnotation = "cluster.x-k8s.io/skip-remediation"
+
 	// ClusterSecretType defines the type of secret created by core components
 	ClusterSecretType corev1.SecretType = "cluster.x-k8s.io/secret" //nolint:gosec
+
+	// InterruptibleLabel is the label used to mark the nodes that run on interruptible instances
+	InterruptibleLabel = "cluster.x-k8s.io/interruptible"
 )
 
 // MachineAddressType describes a valid MachineAddress type.

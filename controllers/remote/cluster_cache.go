@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -41,11 +42,10 @@ import (
 )
 
 const (
-	defaultClientTimeout = 10 * time.Second
-
 	healthCheckPollInterval       = 10 * time.Second
 	healthCheckRequestTimeout     = 5 * time.Second
 	healthCheckUnhealthyThreshold = 10
+	ClusterCacheControllerName    = "cluster-cache-tracker"
 )
 
 // ClusterCacheTracker manages client caches for workload clusters.
@@ -68,27 +68,6 @@ func NewClusterCacheTracker(log logr.Logger, manager ctrl.Manager) (*ClusterCach
 	}, nil
 }
 
-// NewTestClusterCacheTracker creates a new dummy ClusterCacheTracker that can be used by unit tests with fake client.
-func NewTestClusterCacheTracker(log logr.Logger, cl client.Client, scheme *runtime.Scheme, objKey client.ObjectKey) *ClusterCacheTracker {
-	testCacheTracker := &ClusterCacheTracker{
-		log:              log,
-		client:           cl,
-		scheme:           scheme,
-		clusterAccessors: make(map[client.ObjectKey]*clusterAccessor),
-	}
-
-	delegatingClient := client.NewDelegatingClient(client.NewDelegatingClientInput{
-		CacheReader: cl,
-		Client:      cl,
-	})
-	testCacheTracker.clusterAccessors[objKey] = &clusterAccessor{
-		cache:            nil,
-		delegatingClient: delegatingClient,
-		watches:          nil,
-	}
-	return testCacheTracker
-}
-
 // GetClient returns a cached client for the given cluster.
 func (t *ClusterCacheTracker) GetClient(ctx context.Context, cluster client.ObjectKey) (client.Client, error) {
 	t.lock.Lock()
@@ -99,28 +78,14 @@ func (t *ClusterCacheTracker) GetClient(ctx context.Context, cluster client.Obje
 		return nil, err
 	}
 
-	return accessor.delegatingClient, nil
+	return accessor.client, nil
 }
 
-// GetLiveClient returns a live client (talks to the api-server directly) for the given cluster.
-func (t *ClusterCacheTracker) GetLiveClient(ctx context.Context, cluster client.ObjectKey) (client.Client, error) {
-	t.lock.Lock()
-	defer t.lock.Unlock()
-
-	accessor, err := t.getClusterAccessorLH(ctx, cluster)
-	if err != nil {
-		return nil, err
-	}
-
-	return accessor.liveClient, nil
-}
-
-// clusterAccessor represents the combination of a delegating client, live client (direct to api-server), cache, and watches for a remote cluster.
+// clusterAccessor represents the combination of a delegating client, cache, and watches for a remote cluster.
 type clusterAccessor struct {
-	cache            *stoppableCache
-	delegatingClient client.Client
-	liveClient       client.Client
-	watches          sets.String
+	cache   *stoppableCache
+	client  client.Client
+	watches sets.String
 }
 
 // clusterAccessorExists returns true if a clusterAccessor exists for cluster.
@@ -153,11 +118,10 @@ func (t *ClusterCacheTracker) getClusterAccessorLH(ctx context.Context, cluster 
 // newClusterAccessor creates a new clusterAccessor.
 func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster client.ObjectKey) (*clusterAccessor, error) {
 	// Get a rest config for the remote cluster
-	config, err := RESTConfig(ctx, t.client, cluster)
+	config, err := RESTConfig(ctx, ClusterCacheControllerName, t.client, cluster)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error fetching REST client config for remote cluster %q", cluster.String())
 	}
-	config.Timeout = defaultClientTimeout
 
 	// Create a mapper for it
 	mapper, err := apiutil.NewDynamicRESTMapper(config)
@@ -198,16 +162,22 @@ func (t *ClusterCacheTracker) newClusterAccessor(ctx context.Context, cluster cl
 		cfg:     config,
 	})
 
-	delegatingClient := client.NewDelegatingClient(client.NewDelegatingClientInput{
+	delegatingClient, err := client.NewDelegatingClient(client.NewDelegatingClientInput{
 		CacheReader: cache,
 		Client:      c,
+		UncachedObjects: []client.Object{
+			&corev1.ConfigMap{},
+			&corev1.Secret{},
+		},
 	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &clusterAccessor{
-		cache:            cache,
-		delegatingClient: delegatingClient,
-		liveClient:       c,
-		watches:          sets.NewString(),
+		cache:   cache,
+		client:  delegatingClient,
+		watches: sets.NewString(),
 	}, nil
 }
 
@@ -374,7 +344,9 @@ func (t *ClusterCacheTracker) healthCheckCluster(ctx context.Context, in *health
 	err := wait.PollImmediateUntil(in.interval, runHealthCheckWithThreshold, ctx.Done())
 	// An error returned implies the health check has failed a sufficient number of
 	// times for the cluster to be considered unhealthy
-	if err != nil {
+	// NB. we are ignoring ErrWaitTimeout because this error happens when the channel is close, that in this case
+	// happens when the cache is explicitly stopped.
+	if err != nil && err != wait.ErrWaitTimeout {
 		t.log.Error(err, "Error health checking cluster", "cluster", in.cluster.String())
 		t.deleteAccessor(in.cluster)
 	}

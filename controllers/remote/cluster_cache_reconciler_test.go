@@ -73,10 +73,6 @@ var _ = Describe("ClusterCache Reconciler suite", func() {
 			By("Creating a clusterAccessor for the cluster")
 			_, err := cct.GetClient(ctx, testClusterKey)
 			Expect(err).To(BeNil())
-
-			By("Retrieving a live client for the cluster")
-			_, err = cct.GetLiveClient(ctx, testClusterKey)
-			Expect(err).To(BeNil())
 		}
 
 		BeforeEach(func() {
@@ -105,6 +101,7 @@ var _ = Describe("ClusterCache Reconciler suite", func() {
 			go func() {
 				Expect(mgr.Start(mgrContext)).To(Succeed())
 			}()
+			<-testEnv.Manager.Elected()
 
 			k8sClient = mgr.GetClient()
 

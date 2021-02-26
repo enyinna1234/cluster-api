@@ -74,6 +74,7 @@ users:
 		Data: map[string][]byte{
 			secret.KubeconfigDataName: []byte(validKubeConfig),
 		},
+		Type: clusterv1.ClusterSecretType,
 	}
 )
 
@@ -92,7 +93,9 @@ func TestGetKubeConfigSecret(t *testing.T) {
 		Name:      "test1",
 		Namespace: "test",
 	}
-	client := fake.NewFakeClientWithScheme(setupScheme(), validSecret)
+	// creating a local copy to ensure validSecret.ObjectMeta.ResourceVersion does not get set by fakeClient
+	validSec := validSecret.DeepCopy()
+	client := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(validSec).Build()
 
 	found, err := FromSecret(ctx, client, clusterKey)
 	g.Expect(err).NotTo(HaveOccurred())
@@ -256,7 +259,7 @@ func TestCreateSecretWithOwner(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(setupScheme(), caSecret)
+	c := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(caSecret).Build()
 
 	owner := metav1.OwnerReference{
 		Name:       "test1",
@@ -281,6 +284,7 @@ func TestCreateSecretWithOwner(t *testing.T) {
 	key := client.ObjectKey{Name: "test1-kubeconfig", Namespace: "test"}
 	g.Expect(c.Get(ctx, key, s)).To(Succeed())
 	g.Expect(s.OwnerReferences).To(ContainElement(owner))
+	g.Expect(s.Type).To(Equal(clusterv1.ClusterSecretType))
 
 	clientConfig, err := clientcmd.NewClientConfigFromBytes(s.Data[secret.KubeconfigDataName])
 	g.Expect(err).NotTo(HaveOccurred())
@@ -310,7 +314,7 @@ func TestCreateSecret(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(setupScheme(), caSecret)
+	c := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(caSecret).Build()
 
 	cluster := &clusterv1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
@@ -343,6 +347,7 @@ func TestCreateSecret(t *testing.T) {
 			APIVersion: clusterv1.GroupVersion.String(),
 		},
 	))
+	g.Expect(s.Type).To(Equal(clusterv1.ClusterSecretType))
 
 	clientConfig, err := clientcmd.NewClientConfigFromBytes(s.Data[secret.KubeconfigDataName])
 	g.Expect(err).NotTo(HaveOccurred())
@@ -404,7 +409,7 @@ func TestRegenerateClientCerts(t *testing.T) {
 		},
 	}
 
-	c := fake.NewFakeClientWithScheme(setupScheme(), validSecret, caSecret)
+	c := fake.NewClientBuilder().WithScheme(setupScheme()).WithObjects(validSecret, caSecret).Build()
 
 	oldConfig, err := clientcmd.Load(validSecret.Data[secret.KubeconfigDataName])
 	g.Expect(err).NotTo(HaveOccurred())
